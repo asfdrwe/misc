@@ -1,0 +1,398 @@
+diff -uNr Autolykos2_AMD_Miner.orig/OCLdefs.h Autolykos2_AMD_Miner/OCLdefs.h
+--- Autolykos2_AMD_Miner.orig/OCLdefs.h	2021-09-27 09:38:48.000000000 +0900
++++ Autolykos2_AMD_Miner/OCLdefs.h	2021-09-27 09:40:08.000000000 +0900
+@@ -10,9 +10,13 @@
+ typedef long long          int64_t;
+ #else
+ #ifndef __OPENCL_VERSION__
++#ifdef __APPLE__
++#include <OpenCL/cl.h>
++#else
+ #include <CL/cl.h>
+ #endif
+ #endif
++#endif
+ typedef signed char        int8_t;
+ typedef short              int16_t;
+ typedef int                int32_t;
+diff -uNr Autolykos2_AMD_Miner.orig/adl-sdk/adl_functaions.h Autolykos2_AMD_Miner/adl-sdk/adl_functaions.h
+--- Autolykos2_AMD_Miner.orig/adl-sdk/adl_functaions.h	2021-09-27 09:38:48.000000000 +0900
++++ Autolykos2_AMD_Miner/adl-sdk/adl_functaions.h	2021-09-27 09:40:08.000000000 +0900
+@@ -1,5 +1,5 @@
+ 
+-#if defined (__unix__)
++#if defined (__unix__) || defined (__APPLE__)
+ #	include <dlfcn.h>	//dyopen, dlsym, dlclose
+ #	include <stdlib.h>
+ #	include <string.h>	//memeset
+diff -uNr Autolykos2_AMD_Miner.orig/adl-sdk/adl_sdk.h Autolykos2_AMD_Miner/adl-sdk/adl_sdk.h
+--- Autolykos2_AMD_Miner.orig/adl-sdk/adl_sdk.h	2021-09-27 09:38:48.000000000 +0900
++++ Autolykos2_AMD_Miner/adl-sdk/adl_sdk.h	2021-09-27 09:40:08.000000000 +0900
+@@ -33,7 +33,7 @@
+ 
+ #include "adl_structures.h"
+ 
+-#if defined (__unix__)
++#if defined (__unix__) || defined (__APPLE__)
+ #define __stdcall
+ #endif /* (LINUX) */
+ 
+diff -uNr Autolykos2_AMD_Miner.orig/adl.h Autolykos2_AMD_Miner/adl.h
+--- Autolykos2_AMD_Miner.orig/adl.h	2021-09-27 09:38:48.000000000 +0900
++++ Autolykos2_AMD_Miner/adl.h	2021-09-27 09:40:08.000000000 +0900
+@@ -4,7 +4,7 @@
+ 
+ #include <stdio.h>
+ 
+-#if defined (__unix__)
++#if defined (__unix__) || defined (__APPLE__)
+ # include <dlfcn.h>
+ # include <stdlib.h>
+ # include <unistd.h>
+@@ -21,7 +21,7 @@
+ // #define PRINTF
+ #define PRINTF printf
+ 
+-#if defined (__unix__)
++#if defined (__unix__) || defined (__APPLE__)
+   static void *hDLL;  // Handle to .so library
+ #else
+   static  HINSTANCE hDLL;   // Handle to DLL
+@@ -81,7 +81,7 @@
+     }
+ }
+ 
+-#if defined (__unix__)
++#if defined (__unix__) || defined (__APPLE__)
+ // equivalent functions in linux
+ static void *GetProcAddress(void *pLibrary, const char *name)
+ {
+@@ -101,7 +101,7 @@
+ 
+ 	  int result;
+ 
+-	#if defined (__unix__)
++	#if defined (__unix__) || defined (__APPLE__)
+ 	  hDLL = dlopen( "libatiadlxx.so", RTLD_LAZY|RTLD_GLOBAL);
+ 	#else
+ 	  hDLL = LoadLibrary("atiadlxx.dll");
+@@ -191,7 +191,7 @@
+ 
+     ADL_Main_Control_Destroy();
+ 
+-#if defined (__unix__)
++#if defined (__unix__) || defined (__APPLE__)
+   dlclose(hDLL);
+ #else
+   FreeLibrary(hDLL);
+diff -uNr Autolykos2_AMD_Miner.orig/cl_warpper.cpp Autolykos2_AMD_Miner/cl_warpper.cpp
+--- Autolykos2_AMD_Miner.orig/cl_warpper.cpp	2021-09-27 09:38:48.000000000 +0900
++++ Autolykos2_AMD_Miner/cl_warpper.cpp	2021-09-27 09:40:08.000000000 +0900
+@@ -283,6 +283,7 @@
+ bool CLWarpper::getSVMcapabilities()
+ {
+ 
++#if 0
+ 	cl_device_svm_capabilities caps;
+ 
+ 	cl_int err = clGetDeviceInfo(
+@@ -297,6 +298,7 @@
+ 	{
+ 		return true;
+ 	}
++#endif
+ 	return false;
+ 
+ }
+@@ -436,13 +438,14 @@
+ 	return static_cast<int64_t>(value);
+ }
+ 
++#if 0
+ int CLWarpper::getDeviceTopology(cl_device_topology_amd *topo) {
+ 
+ 
+ 	int status = clGetDeviceInfo(device, CL_DEVICE_TOPOLOGY_AMD, sizeof(cl_device_topology_amd), topo, 0);
+ 	return status;
+ }
+-
++#endif
+ 
+ void printPlatformInfoString(std::string valuename, cl_platform_id platformId, cl_platform_info name)
+ {
+diff -uNr Autolykos2_AMD_Miner.orig/cl_warpper.h Autolykos2_AMD_Miner/cl_warpper.h
+--- Autolykos2_AMD_Miner.orig/cl_warpper.h	2021-09-27 09:38:48.000000000 +0900
++++ Autolykos2_AMD_Miner/cl_warpper.h	2021-09-27 09:40:08.000000000 +0900
+@@ -2,8 +2,8 @@
+ #define CL_WARPPER_H
+ 
+ //#define CL_USE_DEPRECATED_OPENCL_1_2_APIS
+-#include <CL/cl.h>
+-#include <CL/cl_ext.h>
++#include <OpenCL/cl.h>
++#include <OpenCL/cl_ext.h>
+ #include <cstdlib>
+ #include <cassert>
+ #include <iostream>
+@@ -88,7 +88,9 @@
+ 	static std::string getFileContents(std::string filename);
+ public:
+ 	int64_t getDeviceInfoInt64(cl_device_info name);
++#if 0
+ 	int getDeviceTopology(cl_device_topology_amd *topo);
++#endif
+ };
+ 
+ 
+diff -uNr Autolykos2_AMD_Miner.orig/ergoAutolykos.cpp Autolykos2_AMD_Miner/ergoAutolykos.cpp
+--- Autolykos2_AMD_Miner.orig/ergoAutolykos.cpp	2021-09-27 09:38:48.000000000 +0900
++++ Autolykos2_AMD_Miner/ergoAutolykos.cpp	2021-09-27 09:40:08.000000000 +0900
+@@ -95,7 +95,9 @@
+ 		LOG(ERROR) << "GPU " << clw->m_gpuIndex << " Not enough GPU memory for mining,"
+ 				<< " minimum 2.8 GiB needed";
+ 
++#if 0
+ 		return;
++#endif
+ 	}
+ 
+ 
+@@ -460,8 +462,9 @@
+ 		clGetPlatformInfo(platforms[i], CL_PLATFORM_NAME, size, pName, NULL); // get profile char array
+ 		//cout << pName << endl;
+ 		char *aMD = (char *)"AMD";
++		char *aPPLE = (char *)"Apple";
+ 		char *srcName;
+-		if (!ispartof(pName, aMD))
++		if (!(ispartof(pName, aMD) || ispartof(pName, aPPLE)))
+ 		{
+ 			continue;
+ 
+diff -uNr Autolykos2_AMD_Miner.orig/httpapi.cc Autolykos2_AMD_Miner/httpapi.cc
+--- Autolykos2_AMD_Miner.orig/httpapi.cc	2021-09-27 09:38:48.000000000 +0900
++++ Autolykos2_AMD_Miner/httpapi.cc	2021-09-27 09:40:08.000000000 +0900
+@@ -2,8 +2,10 @@
+ 
+ using namespace httplib;
+ #ifndef __linux__
++#ifndef __APPLE__
+ #define __withADL__
+ #endif
++#endif
+ 
+ inline int key(std::pair<int,int> x)
+ {
+@@ -35,6 +37,7 @@
+ 		}
+ 	}
+ #else
++#ifdef __linux
+ 	cl_device_topology_amd topo;
+ 
+ 	for (size_t j = 0; j < minerCount; j++)
+@@ -53,6 +56,7 @@
+ 	}
+ 	init_sysfs_hwcontrols(minerCount);
+ #endif
++#endif
+ }
+ 
+ 
+diff -uNr Autolykos2_AMD_Miner.orig/macOS/makefile Autolykos2_AMD_Miner/macOS/makefile
+--- Autolykos2_AMD_Miner.orig/macOS/makefile	1970-01-01 09:00:00.000000000 +0900
++++ Autolykos2_AMD_Miner/macOS/makefile	2021-09-27 09:40:08.000000000 +0900
+@@ -0,0 +1,58 @@
++################################################################################
++# Automatically-generated file. Do not edit!
++################################################################################
++
++-include ../makefile.init
++
++RM := rm -rf
++
++# All of the sources participating in the build are defined here
++-include sources.mk
++-include x64/Debug/subdir.mk
++-include subdir.mk
++-include objects.mk
++
++ifneq ($(MAKECMDGOALS),clean)
++ifneq ($(strip $(CC_DEPS)),)
++-include $(CC_DEPS)
++endif
++ifneq ($(strip $(C++_DEPS)),)
++-include $(C++_DEPS)
++endif
++ifneq ($(strip $(C_UPPER_DEPS)),)
++-include $(C_UPPER_DEPS)
++endif
++ifneq ($(strip $(CXX_DEPS)),)
++-include $(CXX_DEPS)
++endif
++ifneq ($(strip $(CPP_DEPS)),)
++-include $(CPP_DEPS)
++endif
++ifneq ($(strip $(C_DEPS)),)
++-include $(C_DEPS)
++endif
++endif
++
++-include ../makefile.defs
++
++# Add inputs and outputs from these tool invocations to the build variables 
++
++# All Target
++all: ErgoOpenCL
++
++# Tool invocations
++ErgoOpenCL: $(OBJS) $(USER_OBJS)
++	@echo 'Building target: $@'
++	@echo 'Invoking: GCC C++ Linker'
++	g++ -o "ErgoOpenCL" $(OBJS) $(USER_OBJS) $(LIBS)
++	@echo 'Finished building target: $@'
++	@echo ' '
++
++# Other Targets
++clean:
++	-$(RM) $(CC_DEPS)$(C++_DEPS)$(EXECUTABLES)$(C_UPPER_DEPS)$(CXX_DEPS)$(OBJS)$(CPP_DEPS)$(C_DEPS) ErgoOpenCL
++	-@echo ' '
++
++.PHONY: all clean dependents
++
++-include ../makefile.targets
+diff -uNr Autolykos2_AMD_Miner.orig/macOS/objects.mk Autolykos2_AMD_Miner/macOS/objects.mk
+--- Autolykos2_AMD_Miner.orig/macOS/objects.mk	1970-01-01 09:00:00.000000000 +0900
++++ Autolykos2_AMD_Miner/macOS/objects.mk	2021-09-27 09:40:08.000000000 +0900
+@@ -0,0 +1,8 @@
++################################################################################
++# Automatically-generated file. Do not edit!
++################################################################################
++
++USER_OBJS :=
++
++LIBS := -lcurl -ldl -lcrypto -lpthread -lssl -framework OpenCL `pkg-config --libs openssl`
++
+diff -uNr Autolykos2_AMD_Miner.orig/macOS/sources.mk Autolykos2_AMD_Miner/macOS/sources.mk
+--- Autolykos2_AMD_Miner.orig/macOS/sources.mk	1970-01-01 09:00:00.000000000 +0900
++++ Autolykos2_AMD_Miner/macOS/sources.mk	2021-09-27 09:40:08.000000000 +0900
+@@ -0,0 +1,28 @@
++################################################################################
++# Automatically-generated file. Do not edit!
++################################################################################
++
++C_UPPER_SRCS := 
++CXX_SRCS := 
++C++_SRCS := 
++OBJ_SRCS := 
++CC_SRCS := 
++ASM_SRCS := 
++CPP_SRCS := 
++C_SRCS := 
++O_SRCS := 
++S_UPPER_SRCS := 
++CC_DEPS := 
++C++_DEPS := 
++EXECUTABLES := 
++C_UPPER_DEPS := 
++CXX_DEPS := 
++OBJS := 
++CPP_DEPS := 
++C_DEPS := 
++
++# Every subdirectory with source files must be described here
++SUBDIRS := \
++. \
++x64/Debug \
++
+diff -uNr Autolykos2_AMD_Miner.orig/macOS/subdir.mk Autolykos2_AMD_Miner/macOS/subdir.mk
+--- Autolykos2_AMD_Miner.orig/macOS/subdir.mk	1970-01-01 09:00:00.000000000 +0900
++++ Autolykos2_AMD_Miner/macOS/subdir.mk	2021-09-27 09:40:08.000000000 +0900
+@@ -0,0 +1,88 @@
++################################################################################
++# Automatically-generated file. Do not edit!
++################################################################################
++
++# Add inputs and outputs from these tool invocations to the build variables 
++CC_SRCS += \
++../conversion.cc \
++../cryptography.cc \
++../definitions.cc \
++../easylogging++.cc \
++../httpapi.cc \
++../processing.cc \
++../request.cc \
++../sysfs-gpu-controls.cc 
++
++CPP_SRCS += \
++../cpuAutolykos.cpp \
++../ErgoOpenCL.cpp \
++../clMining.cpp \
++../clPreHash.cpp \
++../cl_warpper.cpp \
++../ergoAutolykos.cpp 
++
++C_SRCS += \
++../jsmn.c 
++
++CC_DEPS += \
++./conversion.d \
++./cryptography.d \
++./definitions.d \
++./easylogging++.d \
++./httpapi.d \
++./processing.d \
++./request.d \
++./sysfs-gpu-controls.d 
++
++OBJS += \
++./cpuAutolykos.o \
++./ErgoOpenCL.o \
++./clMining.o \
++./clPreHash.o \
++./cl_warpper.o \
++./conversion.o \
++./cryptography.o \
++./definitions.o \
++./easylogging++.o \
++./ergoAutolykos.o \
++./httpapi.o \
++./jsmn.o \
++./processing.o \
++./request.o \
++./sysfs-gpu-controls.o 
++
++CPP_DEPS += \
++./cpuAutolykos.d \
++./ErgoOpenCL.d \
++./clMining.d \
++./clPreHash.d \
++./cl_warpper.d \
++./ergoAutolykos.d 
++
++C_DEPS += \
++./jsmn.d 
++
++
++# Each subdirectory must supply rules for building sources it contributes
++%.o: ../%.cpp
++	@echo 'Building file: $<'
++	@echo 'Invoking: GCC C++ Compiler'
++	g++ -std=c++11 `pkg-config --cflags openssl` -O0 -g3 -Wall -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@)" -o "$@" "$<"
++	@echo 'Finished building: $<'
++	@echo ' '
++
++%.o: ../%.cc
++	@echo 'Building file: $<'
++	@echo 'Invoking: GCC C++ Compiler'
++	g++ -std=c++11 `pkg-config --cflags openssl` -O0 -g3 -Wall -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@)" -o "$@" "$<"
++	@echo 'Finished building: $<'
++	@echo ' '
++
++%.o: ../%.c
++	@echo 'Building file: $<'
++	@echo 'Invoking: GCC C Compiler'
++	gcc `pkg-condfig --cflags openssl` -O0 -g3 -Wall -c -fmessage-length=0 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@)" -o "$@" "$<"
++	@echo 'Finished building: $<'
++	@echo ' '
++
++
