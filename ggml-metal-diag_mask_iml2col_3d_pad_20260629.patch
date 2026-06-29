@@ -1,0 +1,527 @@
+diff -uNr ggml.orig/src/ggml-metal/ggml-metal-device.cpp ggml/src/ggml-metal/ggml-metal-device.cpp
+--- ggml.orig/src/ggml-metal/ggml-metal-device.cpp	2026-06-29 18:20:17
++++ ggml/src/ggml-metal/ggml-metal-device.cpp	2026-06-29 18:26:34
+@@ -2028,6 +2028,41 @@
+     return res;
+ }
+ 
++ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_diag_mask_inf(ggml_metal_library_t lib, const ggml_tensor *op) {
++    assert(op->op == GGML_OP_DIAG_MASK_INF);
++
++    char base[256];
++    char name[256];
++
++    snprintf(base, sizeof(base), "kernel_op_diag_mask_inf_%s", ggml_type_name(op->src[0]->type));
++    snprintf(name, sizeof(name), "%s", base);
++
++    ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
++
++    if (!res.pipeline) {
++        res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
++    }
++
++    return res;
++}
++
++ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_im2col_3d(ggml_metal_library_t lib, const ggml_tensor *op) {
++    assert(op->op == GGML_OP_IM2COL_3D);
++
++    char base[256];
++    char name[256];
++
++    snprintf(base, 256, "kernel_op_im2col_3d_%s", ggml_type_name(op->type));
++    snprintf(name, 256, "%s", base);
++
++    ggml_metal_pipeline_with_params res = ggml_metal_library_get_pipeline(lib, name);
++    if (!res.pipeline) {
++        res = ggml_metal_library_compile_pipeline(lib, base, name, nullptr);
++    }
++
++    return res;
++}
++
+ ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_memset(ggml_metal_library_t lib, const ggml_tensor *  op) {
+     GGML_ASSERT(op->type == GGML_TYPE_I64);
+ 
+diff -uNr ggml.orig/src/ggml-metal/ggml-metal-device.h ggml/src/ggml-metal/ggml-metal-device.h
+--- ggml.orig/src/ggml-metal/ggml-metal-device.h	2026-06-29 18:20:17
++++ ggml/src/ggml-metal/ggml-metal-device.h	2026-06-29 18:30:01
+@@ -160,6 +160,8 @@
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_timestep_embedding(ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_opt_step_adamw    (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_opt_step_sgd      (ggml_metal_library_t lib, const struct ggml_tensor * op);
++struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_diag_mask_inf     (ggml_metal_library_t lib, const struct ggml_tensor * op);
++struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_im2col_3d         (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_memset            (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ struct ggml_metal_pipeline_with_params ggml_metal_library_get_pipeline_count_equal       (ggml_metal_library_t lib, const struct ggml_tensor * op);
+ 
+diff -uNr ggml.orig/src/ggml-metal/ggml-metal-device.m ggml/src/ggml-metal/ggml-metal-device.m
+--- ggml.orig/src/ggml-metal/ggml-metal-device.m	2026-06-29 18:20:17
++++ ggml/src/ggml-metal/ggml-metal-device.m	2026-06-29 18:30:31
+@@ -1200,13 +1200,7 @@
+         case GGML_OP_POOL_2D:
+             return op->src[0]->type == GGML_TYPE_F32;
+         case GGML_OP_PAD:
+-            // TODO: add circular padding support for metal, see https://github.com/ggml-org/llama.cpp/pull/16985
+-            if (ggml_get_op_params_i32(op, 8) != 0) {
+-                return false;
+-            }
+-
+-            return (ggml_get_op_params_i32(op, 0) == 0) && (ggml_get_op_params_i32(op, 2) == 0) &&
+-                   (ggml_get_op_params_i32(op, 4) == 0) && (ggml_get_op_params_i32(op, 6) == 0);
++            return true;
+         case GGML_OP_PAD_REFLECT_1D:
+         case GGML_OP_TIMESTEP_EMBEDDING:
+         case GGML_OP_LEAKY_RELU:
+@@ -1353,6 +1347,9 @@
+         case GGML_OP_OPT_STEP_ADAMW:
+         case GGML_OP_OPT_STEP_SGD:
+             return has_simdgroup_reduction;
++        case GGML_OP_DIAG_MASK_INF:
++        case GGML_OP_IM2COL_3D:
++            return true;
+         default:
+             return false;
+     }
+diff -uNr ggml.orig/src/ggml-metal/ggml-metal-impl.h ggml/src/ggml-metal/ggml-metal-impl.h
+--- ggml.orig/src/ggml-metal/ggml-metal-impl.h	2026-06-29 18:20:17
++++ ggml/src/ggml-metal/ggml-metal-impl.h	2026-06-29 18:31:15
+@@ -1007,6 +1007,14 @@
+     uint64_t nb1;
+     uint64_t nb2;
+     uint64_t nb3;
++    int32_t  lp0;
++    int32_t  rp0;
++    int32_t  lp1;
++    int32_t  rp1;
++    int32_t  lp2;
++    int32_t  rp2;
++    int32_t  lp3;
++    int32_t  rp3;
+ } ggml_metal_kargs_pad;
+ 
+ typedef struct {
+@@ -1171,5 +1179,44 @@
+ typedef struct {
+     int64_t  np;
+ } ggml_metal_kargs_opt_step_sgd;
++
++typedef struct {
++    uint64_t n_past;
++    uint64_t ne0;
++    uint64_t ne1;
++    uint64_t ne2;
++    uint64_t ne3;
++} ggml_metal_kargs_diag_mask_inf;
++
++typedef struct {
++    uint32_t s0;
++    uint32_t s1;
++    uint32_t s2;
++    uint32_t p0;
++    uint32_t p1;
++    uint32_t p2;
++    uint32_t d0;
++    uint32_t d1;
++    uint32_t d2;
++    uint32_t IC;
++    uint32_t ID;
++    uint32_t IH;
++    uint32_t IW;
++    uint32_t KD;
++    uint32_t KH;
++    uint32_t KW;
++    uint32_t OD;
++    uint32_t OH;
++    uint32_t OW;
++    uint64_t nb13;
++    uint64_t nb12;
++    uint64_t nb11;
++    uint64_t nb10;
++    uint64_t OH_OW;
++    uint64_t KH_KW;
++    uint64_t KD_KH_KW;
++    uint64_t IC_KD_KH_KW;
++    uint64_t N;
++} ggml_metal_kargs_im2col_3d;
+ 
+ #endif // GGML_METAL_IMPL
+diff -uNr ggml.orig/src/ggml-metal/ggml-metal-ops.cpp ggml/src/ggml-metal/ggml-metal-ops.cpp
+--- ggml.orig/src/ggml-metal/ggml-metal-ops.cpp	2026-06-29 18:20:17
++++ ggml/src/ggml-metal/ggml-metal-ops.cpp	2026-06-29 18:34:34
+@@ -469,6 +469,14 @@
+             {
+                 n_fuse = ggml_metal_op_opt_step_sgd(ctx, idx);
+             } break;
++        case GGML_OP_DIAG_MASK_INF:
++            {
++                n_fuse = ggml_metal_op_diag_mask_inf(ctx, idx);
++            } break;
++        case GGML_OP_IM2COL_3D:
++            {
++                n_fuse = ggml_metal_op_im2col_3d(ctx, idx);
++            } break;
+         case GGML_OP_COUNT_EQUAL:
+             {
+                 n_fuse = ggml_metal_op_count_equal(ctx, idx);
+@@ -4038,6 +4046,15 @@
+     GGML_TENSOR_LOCALS( int32_t, ne,  op,         ne);
+     GGML_TENSOR_LOCALS(uint64_t, nb,  op,         nb);
+ 
++    const int32_t lp0 = ggml_get_op_params_i32(op, 0);
++    const int32_t rp0 = ggml_get_op_params_i32(op, 1);
++    const int32_t lp1 = ggml_get_op_params_i32(op, 2);
++    const int32_t rp1 = ggml_get_op_params_i32(op, 3);
++    const int32_t lp2 = ggml_get_op_params_i32(op, 4);
++    const int32_t rp2 = ggml_get_op_params_i32(op, 5);
++    const int32_t lp3 = ggml_get_op_params_i32(op, 6);
++    const int32_t rp3 = ggml_get_op_params_i32(op, 7);
++
+     ggml_metal_kargs_pad args = {
+         /*.ne00 =*/ ne00,
+         /*.ne01 =*/ ne01,
+@@ -4054,7 +4071,15 @@
+         /*.nb0  =*/ nb0,
+         /*.nb1  =*/ nb1,
+         /*.nb2  =*/ nb2,
+-        /*.nb3  =*/ nb3
++        /*.nb3  =*/ nb3,
++        /*.lp0  =*/ lp0,
++        /*.rp0  =*/ rp0,
++        /*.lp1  =*/ lp1,
++        /*.rp1  =*/ rp1,
++        /*.lp2  =*/ lp2,
++        /*.rp2  =*/ rp2,
++        /*.lp3  =*/ lp3,
++        /*.rp3  =*/ rp3,
+     };
+ 
+     auto pipeline = ggml_metal_library_get_pipeline_pad(lib, op);
+@@ -4567,6 +4592,95 @@
+     const int64_t n = (np + nth - 1) / nth;
+ 
+     ggml_metal_encoder_dispatch_threadgroups(enc, n, 1, 1, nth, 1, 1);
++
++    return 1;
++}
++
++int ggml_metal_op_diag_mask_inf(ggml_metal_op_t ctx, int idx) {
++    ggml_tensor * op = ctx->node(idx);
++
++    ggml_metal_library_t lib = ctx->lib;
++    ggml_metal_encoder_t enc = ctx->enc;
++
++    const ggml_tensor * src0 = op->src[0];
++
++    const int64_t n_past = (int64_t)((int32_t *) op->op_params)[0];
++
++    ggml_metal_kargs_diag_mask_inf args = {
++        /*.n_past =*/ (uint64_t)n_past,
++        /*.ne0    =*/ (uint64_t)src0->ne[0],
++        /*.ne1    =*/ (uint64_t)src0->ne[1],
++        /*.ne2    =*/ (uint64_t)src0->ne[2],
++        /*.ne3    =*/ (uint64_t)src0->ne[3],
++    };
++
++    ggml_metal_pipeline_with_params pipeline = ggml_metal_library_get_pipeline_diag_mask_inf(lib, op);
++
++    ggml_metal_encoder_set_pipeline(enc, pipeline);
++    ggml_metal_encoder_set_bytes(enc, &args, sizeof(args), 0);
++    ggml_metal_encoder_set_buffer(enc, ggml_metal_get_buffer_id(src0), 1);
++    ggml_metal_encoder_set_buffer(enc, ggml_metal_get_buffer_id(op),   2);
++
++    ggml_metal_encoder_dispatch_threadgroups(enc, 1, 1, 1, 1, 1, 1);
++
++    return 1;
++}
++
++int ggml_metal_op_im2col_3d(ggml_metal_op_t ctx, int idx) {
++    ggml_tensor *dst = ctx->node(idx);
++    const ggml_tensor *src0 = dst->src[0];
++    const ggml_tensor *src1 = dst->src[1];
++    ggml_metal_library_t lib = ctx->lib;
++    ggml_metal_encoder_t enc = ctx->enc;
++
++    GGML_TENSOR_BINARY_OP_LOCALS;
++
++    ggml_metal_kargs_im2col_3d args = {
++        .s0 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 0)),
++        .s1 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 1)),
++        .s2 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 2)),
++        .p0 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 3)),
++        .p1 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 4)),
++        .p2 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 5)),
++        .d0 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 6)),
++        .d1 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 7)),
++        .d2 = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 8)),
++        .IC = static_cast<uint32_t>(ggml_get_op_params_i32(dst, 9)),
++
++        .ID = static_cast<uint32_t>(ne12),
++        .IH = static_cast<uint32_t>(ne11),
++        .IW = static_cast<uint32_t>(ne10),
++
++        .KD = static_cast<uint32_t>(ne02),
++        .KH = static_cast<uint32_t>(ne01),
++        .KW = static_cast<uint32_t>(ne00),
++
++        .OH = static_cast<uint32_t>(ne2),
++        .OW = static_cast<uint32_t>(ne1),
++    };
++
++    args.N            = ne13 / args.IC;
++    args.OD           = ne3 / args.N;
++    args.nb13         = nb13;
++    args.nb12         = nb12;
++    args.nb11         = nb11;
++    args.nb10         = nb10;
++
++    args.OH_OW        = (uint64_t) args.OH * args.OW;
++    args.KH_KW        = (uint64_t) args.KH * args.KW;
++    args.KD_KH_KW     = (uint64_t) args.KD * args.KH_KW;
++    args.IC_KD_KH_KW  = (uint64_t) args.IC * args.KD_KH_KW;
++
++    ggml_metal_pipeline_with_params pipeline = ggml_metal_library_get_pipeline_im2col_3d(lib, dst);
++
++    ggml_metal_encoder_set_pipeline(enc, pipeline);
++    ggml_metal_encoder_set_bytes(enc, &args, sizeof(args), 0);
++
++    ggml_metal_encoder_set_buffer(enc, ggml_metal_get_buffer_id(src1), 1);
++    ggml_metal_encoder_set_buffer(enc, ggml_metal_get_buffer_id(dst), 2);
++
++    const uint64_t total = (uint64_t) args.N * args.OD * args.OH * args.OW;
++    ggml_metal_encoder_dispatch_threadgroups(enc, total, 1, 1, 1, 1, 1);
+ 
+     return 1;
+ }
+diff -uNr ggml.orig/src/ggml-metal/ggml-metal-ops.h ggml/src/ggml-metal/ggml-metal-ops.h
+--- ggml.orig/src/ggml-metal/ggml-metal-ops.h	2026-06-29 18:20:17
++++ ggml/src/ggml-metal/ggml-metal-ops.h	2026-06-29 18:32:39
+@@ -90,6 +90,8 @@
+ int ggml_metal_op_tri               (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_opt_step_adamw    (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_opt_step_sgd      (ggml_metal_op_t ctx, int idx);
++int ggml_metal_op_diag_mask_inf     (ggml_metal_op_t ctx, int idx);
++int ggml_metal_op_im2col_3d         (ggml_metal_op_t ctx, int idx);
+ int ggml_metal_op_count_equal       (ggml_metal_op_t ctx, int idx);
+ 
+ #ifdef __cplusplus
+diff -uNr ggml.orig/src/ggml-metal/ggml-metal.metal ggml/src/ggml-metal/ggml-metal.metal
+--- ggml.orig/src/ggml-metal/ggml-metal.metal	2026-06-29 18:20:17
++++ ggml/src/ggml-metal/ggml-metal.metal	2026-06-29 18:33:54
+@@ -5374,33 +5374,53 @@
+ template <typename T>
+ kernel void kernel_pad_impl(
+     constant ggml_metal_kargs_pad & args,
+-    device  const char * src0,
+-    device        char * dst,
++    device const char * src0,
++    device char * dst,
+     uint3 tgpig[[threadgroup_position_in_grid]],
+     uint3 tpitg[[thread_position_in_threadgroup]],
+-    uint3   ntg[[threads_per_threadgroup]]) {
++    uint3 ntg[[threads_per_threadgroup]]) {
++
+     const int32_t i3 = tgpig.z;
+     const int32_t i2 = tgpig.y;
+-    const int32_t k0 = tgpig.x/args.ne1;
+-    const int32_t i1 = tgpig.x - k0*args.ne1;
++    const int32_t k0 = tgpig.x / args.ne1;
++    const int32_t i1 = tgpig.x - k0 * args.ne1;
+ 
+-    const int32_t i03 = i3;
+-    const int32_t i02 = i2;
+-    const int32_t i01 = i1;
++    device T * dst_ptr =
++        (device T *)(dst +
++            i3 * args.nb3 +
++            i2 * args.nb2 +
++            i1 * args.nb1);
+ 
+-    device const T * src0_ptr = (device const T *) (src0 + i03*args.nb03 + i02*args.nb02 + i01*args.nb01);
+-    device       T * dst_ptr  = (device       T *) (dst  +  i3*args.nb3  +  i2*args.nb2  +  i1*args.nb1);
+-
+     for (int32_t l0 = 0; l0 < 1024; l0 += ntg.x) {
+-        const int32_t i0 = k0*1024 + tpitg.x + l0;
+-        if (i0 >= args.ne0) {
++
++        const int32_t i0 = k0 * 1024 + tpitg.x + l0;
++
++        if (i0 >= args.ne0)
+             break;
+-        }
+ 
+-        if (i0 < args.ne00 && i1 < args.ne01 && i2 < args.ne02 && i3 < args.ne03) {
+-            dst_ptr[i0] = src0_ptr[i0];
++        const int32_t src_i0 = i0 - args.lp0;
++        const int32_t src_i1 = i1 - args.lp1;
++        const int32_t src_i2 = i2 - args.lp2;
++        const int32_t src_i3 = i3 - args.lp3;
++
++        if (src_i0 >= 0 && src_i0 < (int32_t)args.ne00 &&
++            src_i1 >= 0 && src_i1 < (int32_t)args.ne01 &&
++            src_i2 >= 0 && src_i2 < (int32_t)args.ne02 &&
++            src_i3 >= 0 && src_i3 < (int32_t)args.ne03) {
++
++            const int64_t src_offset =
++                  (int64_t)src_i3 * args.nb03
++                + (int64_t)src_i2 * args.nb02
++                + (int64_t)src_i1 * args.nb01
++                + (int64_t)src_i0 * args.nb00;
++
++            dst_ptr[i0] =
++                *(device const T *)(src0 + src_offset);
++
+         } else {
+-            dst_ptr[i0] = 0.0f;
++
++            dst_ptr[i0] = (T)0;
++
+         }
+     }
+ }
+@@ -10679,6 +10699,145 @@
+     }
+ 
+     x[gid] = x[gid] * (1.0f - pars[0] * pars[1]) - pars[0] * g[gid];
++}
++
++
++kernel void kernel_op_diag_mask_inf_f32(
++    constant ggml_metal_kargs_diag_mask_inf & args,
++    device const float * src0,
++    device float * dst,
++    uint tiitg[[thread_index_in_threadgroup]]
++) {
++    if (tiitg != 0) {
++        return;
++    }
++
++    const uint64_t ne0 = args.ne0;
++    const uint64_t ne1 = args.ne1;
++    const uint64_t ne2 = args.ne2;
++    const uint64_t ne3 = args.ne3;
++    const uint64_t n_past = args.n_past;
++
++    const uint64_t total = ne0 * ne1 * ne2 * ne3;
++
++    for (uint64_t idx = 0; idx < total; ++idx) {
++        uint64_t rem = idx;
++        const uint64_t i = rem % ne0;
++        rem /= ne0;
++        const uint64_t j = rem % ne1;
++
++        float val = src0[idx];
++        if (i > n_past + j) {
++            val = -INFINITY;
++        }
++        dst[idx] = val;
++    }
++}
++
++kernel void kernel_op_im2col_3d_f32(
++    constant ggml_metal_kargs_im2col_3d &args,
++    device const uchar *src1c,
++    device float *dst,
++    uint tpig[[thread_position_in_grid]]
++) {
++    const uint64_t total = args.N * args.OD * args.OH * args.OW;
++    if (tpig >= total)
++      return;
++
++    uint64_t idx = tpig;
++
++    uint64_t iow = idx % args.OW;
++    idx /= args.OW;
++
++    uint64_t ioh = idx % args.OH;
++    idx /= args.OH;
++
++    uint64_t iod = idx % args.OD;
++    idx /= args.OD;
++
++    uint64_t in  = idx;
++
++    uint64_t dst_base_offset = ((in * args.OD + iod) * args.OH + ioh) * args.OW + iow;
++    dst_base_offset *= args.IC_KD_KH_KW;
++
++    for (uint32_t iic = 0; iic < args.IC; ++iic) {
++        const uint64_t src_offset0 = ((in * args.IC) + iic) * args.nb13;
++
++        for (uint32_t ikd = 0; ikd < args.KD; ++ikd) {
++            for (uint32_t ikh = 0; ikh < args.KH; ++ikh) {
++                for (uint32_t ikw = 0; ikw < args.KW; ++ikw) {
++                    const int32_t iiw = iow * args.s0 + ikw * args.d0 - args.p0;
++                    const int32_t iih = ioh * args.s1 + ikh * args.d1 - args.p1;
++                    const int32_t iid = iod * args.s2 + ikd * args.d2 - args.p2;
++
++                    const uint64_t dst_idx = dst_base_offset + iic * args.KD_KH_KW + ikd * args.KH_KW + ikh * args.KW + ikw;
++
++                    float val = 0.0f;
++
++                    if (iid >= 0 && iid < args.ID && iih >= 0 && iih < args.IH && iiw >= 0 && iiw < args.IW) {
++                        const uint64_t src_offset = src_offset0 + iid * args.nb12 + iih * args.nb11 + iiw * args.nb10;
++                        const device const uchar* src_bytes = src1c + src_offset;
++                        val = *reinterpret_cast<const device float*>(src_bytes);
++                    }
++
++                    dst[dst_idx] = val;
++                }
++            }
++        }
++    }
++}
++
++kernel void kernel_op_im2col_3d_f16(
++    constant ggml_metal_kargs_im2col_3d &args,
++    device const uchar *src1c,
++    device half *dst,
++    uint tpig[[thread_position_in_grid]]
++) {
++    const uint64_t total = args.N * args.OD * args.OH * args.OW;
++    if (tpig >= total)
++      return;
++
++    uint64_t idx = tpig;
++
++    uint64_t iow = idx % args.OW;
++    idx /= args.OW;
++
++    uint64_t ioh = idx % args.OH;
++    idx /= args.OH;
++
++    uint64_t iod = idx % args.OD;
++    idx /= args.OD;
++
++    uint64_t in  = idx;
++
++    uint64_t dst_base_offset = ((in * args.OD + iod) * args.OH + ioh) * args.OW + iow;
++    dst_base_offset *= args.IC_KD_KH_KW;
++
++    for (uint32_t iic = 0; iic < args.IC; ++iic) {
++        const uint64_t src_offset0 = ((in * args.IC) + iic) * args.nb13;
++
++        for (uint32_t ikd = 0; ikd < args.KD; ++ikd) {
++            for (uint32_t ikh = 0; ikh < args.KH; ++ikh) {
++                for (uint32_t ikw = 0; ikw < args.KW; ++ikw) {
++                    const int32_t iiw = iow * args.s0 + ikw * args.d0 - args.p0;
++                    const int32_t iih = ioh * args.s1 + ikh * args.d1 - args.p1;
++                    const int32_t iid = iod * args.s2 + ikd * args.d2 - args.p2;
++
++                    const uint64_t dst_idx = dst_base_offset + iic * args.KD_KH_KW + ikd * args.KH_KW + ikh * args.KW + ikw;
++
++                    half val = half(0.0f);
++
++                    if (iid >= 0 && iid < args.ID && iih >= 0 && iih < args.IH && iiw >= 0 && iiw < args.IW) {
++                        const uint64_t src_offset = src_offset0 + iid * args.nb12 + iih * args.nb11 + iiw * args.nb10;
++                        const device const uchar* src_bytes = src1c + src_offset;
++                        val = half(*reinterpret_cast<const device float*>(src_bytes));
++                    }
++
++                    dst[dst_idx] = val;
++                }
++            }
++        }
++    }
+ }
+ 
+ template<typename T>
