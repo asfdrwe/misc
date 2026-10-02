@@ -1,0 +1,17 @@
+{
+  "host": "127.0.0.1",
+  "port": 8080,
+  "backend": "vulkan",
+  "device": 0,
+  "threads": 1,
+  "lazy_load": false,
+  "models": [
+    {
+      "id": "irodori-tts",
+      "family": "irodori_tts",
+      "path": "./models/Irodori-TTS-v4-Small-GGUF/irodori-tts-v4-small-q8_0.gguf",
+      "task": "tts",
+      "mode": "offline"
+    }
+  ]
+}
