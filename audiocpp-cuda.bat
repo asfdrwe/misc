@@ -1,0 +1,1 @@
+.\audiocpp_server.exe --ui --ui-management --backend cuda
